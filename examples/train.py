@@ -1,32 +1,3 @@
-# Copyright (c) 2021-2022, InterDigital Communications, Inc
-# All rights reserved.
-
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted (subject to the limitations in the disclaimer
-# below) provided that the following conditions are met:
-
-# * Redistributions of source code must retain the above copyright notice,
-#   this list of conditions and the following disclaimer.
-# * Redistributions in binary form must reproduce the above copyright notice,
-#   this list of conditions and the following disclaimer in the documentation
-#   and/or other materials provided with the distribution.
-# * Neither the name of InterDigital Communications, Inc nor the names of its
-#   contributors may be used to endorse or promote products derived from this
-#   software without specific prior written permission.
-
-# NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
-# THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
-# CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT
-# NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-# PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 import argparse
 import math
 import random
@@ -46,29 +17,19 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from compressai.datasets import ImageFolder
-from compressai.zoo import image_models
+# ==========================================================
+# 修改點 1: 引入 build_model (取代原本的 compressai.zoo import image_models)
+# ==========================================================
+from compressai.models.tic import build_model 
 import wandb
 
 
 class RateDistortionLoss(nn.Module):
     """
     Rate-Distortion Loss with ROI (Region of Interest) weighting.
-    
-    Reduces the weight of water/ocean regions during training to:
-    1. Allow controlled blur on high-entropy stochastic textures
-    2. Prioritize land/structure details
-    3. Avoid overfitting to high-frequency wave patterns
-    
-    Also tracks raw (unweighted) MSE for fair PSNR reporting.
     """
 
     def __init__(self, lmbda=1e-2, roi_factor=0.1):
-        """
-        Args:
-            lmbda (float): Rate-distortion trade-off parameter.
-            roi_factor (float): Weight for water regions (0.0 ~ 1.0).
-                                Default 0.1 means water errors are weighted at 10%.
-        """
         super().__init__()
         self.mse = nn.MSELoss(reduction='none')  # Pixel-wise for weighting
         self.mse_raw = nn.MSELoss()              # For fair PSNR calculation
@@ -76,15 +37,7 @@ class RateDistortionLoss(nn.Module):
         self.roi_factor = roi_factor
 
     def generate_water_mask(self, images):
-        """
-        Generate water body mask using RGB + saturation heuristics.
-        
-        Heuristics for satellite imagery water detection:
-        1. Blue > Red * 1.1 (water is usually more blue than red)
-        2. Blue > Green (avoid green vegetation)
-        3. Blue < 0.9 (avoid white clouds/foam)
-        4. Saturation < 0.3 (water has low saturation)
-        """
+        """ Generate water body mask using RGB + saturation heuristics. """
         images = torch.clamp(images, 0, 1)
         
         r = images[:, 0, :, :]
@@ -96,7 +49,7 @@ class RateDistortionLoss(nn.Module):
         cond2 = b > g          # Blue dominant over green
         cond3 = b < 0.9        # Not too bright (clouds)
         
-        # Saturation condition (water has low saturation)
+        # Saturation condition
         max_rgb = torch.max(torch.max(r, g), b)
         min_rgb = torch.min(torch.min(r, g), b)
         saturation = (max_rgb - min_rgb) / (max_rgb + 1e-8)
@@ -115,7 +68,7 @@ class RateDistortionLoss(nn.Module):
         out = {}
         num_pixels = N * H * W
 
-        # Bpp loss (unchanged)
+        # Bpp loss
         out["bpp_loss"] = sum(
             (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
             for likelihoods in output["likelihoods"].values()
@@ -140,7 +93,6 @@ class RateDistortionLoss(nn.Module):
 
 class AverageMeter:
     """Compute running average."""
-
     def __init__(self):
         self.val = 0
         self.avg = 0
@@ -156,7 +108,6 @@ class AverageMeter:
 
 class CustomDataParallel(nn.DataParallel):
     """Custom DataParallel to access the module methods."""
-
     def __getattr__(self, key):
         try:
             return super().__getattr__(key)
@@ -165,7 +116,10 @@ class CustomDataParallel(nn.DataParallel):
 
 
 def init(args):
-    base_dir = f'./pretrained/{args.model}/{args.quality_level}/'
+    # ==========================================================
+    # 修改點 2: 資料夾命名加入 N 和 M，避免不同架構的權重混在一起
+    # ==========================================================
+    base_dir = f'./pretrained/{args.model}_N{args.N}_M{args.M}/q{args.quality_level}/L{args.lmbda:.4f}/'
     os.makedirs(base_dir, exist_ok=True)
     return base_dir
 
@@ -188,7 +142,6 @@ def setup_logger(log_dir):
 
 def configure_optimizers(net, args):
     """Separate parameters for the main optimizer and the auxiliary optimizer."""
-
     parameters = {
         n for n, p in net.named_parameters()
         if not n.endswith(".quantiles") and p.requires_grad
@@ -199,9 +152,10 @@ def configure_optimizers(net, args):
     }
 
     params_dict = dict(net.named_parameters())
+    
+    # Check for parameter overlap (sanity check)
     inter_params = parameters & aux_parameters
     union_params = parameters | aux_parameters
-
     assert len(inter_params) == 0
     assert len(union_params) - len(params_dict.keys()) == 0
 
@@ -243,7 +197,6 @@ def train_one_epoch(
         import torchvision.transforms.functional as TF
 
         def psnr(mse_val):
-            """Calculate PSNR from MSE value."""
             return 10 * math.log10(1.0 / (mse_val + 1e-10))
 
         if i * len(d) % 5000 == 0 or i == 0:
@@ -253,7 +206,6 @@ def train_one_epoch(
             aux_value = aux_loss.item()
             total_loss = out_criterion["loss"].item()
 
-            # Use RAW MSE for fair PSNR
             psnr_val = psnr(mse_raw_value)
 
             input_img = d[0].detach().cpu()
@@ -310,7 +262,6 @@ def eval_epoch(epoch, dataloader, model, criterion):
             mse_loss.update(out_criterion["mse_loss"])
             mse_loss_raw.update(out_criterion["mse_loss_raw"])
 
-            # Calculate PSNR from RAW (unweighted) MSE
             mse_val = out_criterion["mse_loss_raw"].item()
             psnr_val = 10 * math.log10(1.0 / mse_val) if mse_val > 0 else float('inf')
             psnr_meter.update(psnr_val)
@@ -327,7 +278,6 @@ def eval_epoch(epoch, dataloader, model, criterion):
         f"Aux: {aux_loss.avg:.2f}\n"
     )
 
-    # Log to wandb
     wandb.log({
         f"{log_prefix.lower()}_loss": loss.avg,
         f"{log_prefix.lower()}_mse_weighted": mse_loss.avg,
@@ -350,9 +300,14 @@ def parse_args(argv):
     parser.add_argument(
         "-m", "--model",
         default="tic",
-        choices=image_models.keys(),
         help="Model architecture (default: %(default)s)",
     )
+    # ==========================================================
+    # 修改點 3: 加入 N 和 M 參數，允許控制 Teacher 模型大小
+    # ==========================================================
+    parser.add_argument("--N", type=int, default=128, help="Hidden channels N (default: 128)")
+    parser.add_argument("--M", type=int, default=192, help="Latent channels M (default: 192)")
+    
     parser.add_argument(
         "-d", "--dataset", type=str, required=True, help="Training dataset path"
     )
@@ -378,7 +333,7 @@ def parse_args(argv):
         "-q", "--quality-level",
         type=int,
         default=3,
-        help="Quality level (default: %(default)s)",
+        help="Quality level (Used for folder naming & lambda default)",
     )
     parser.add_argument(
         "--lambda",
@@ -436,7 +391,6 @@ def parse_args(argv):
     )
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
     
-    # ROI Loss parameter
     parser.add_argument(
         "--roi-factor",
         type=float,
@@ -525,11 +479,19 @@ def main(argv):
     else:
         test_dataloader = None
 
-    net = image_models[args.model](quality=int(args.quality_level))
+    # ==========================================================
+    # 修改點 4: 使用 build_model 初始化模型 (不再使用 image_models[key](quality))
+    # ==========================================================
+    logging.info(f"Building Model: {args.model} with N={args.N}, M={args.M}")
+    net = build_model(args.model, N=args.N, M=args.M)
     net = net.to(device)
     
     # Log model architecture info
-    logging.info(f"h_s output channels: {net.h_s[-1].out_channels} (should be {net.M * 2} for Mean-Scale)")
+    # 注意: 如果 M 值改變，這裡的檢查可能需要調整，但基本概念不變
+    try:
+        logging.info(f"h_s output channels: {net.h_s[-1].out_channels} (should be {net.M * 2} for Mean-Scale)")
+    except Exception:
+        pass # 避免因為網路結構不同而 crash
 
     if args.cuda and torch.cuda.device_count() > 1:
         net = CustomDataParallel(net)
@@ -567,7 +529,7 @@ def main(argv):
         )
 
         val_loss = eval_epoch(epoch, val_dataloader, net, criterion)
-        lr_scheduler.step()  # MultiStepLR doesn't need val_loss
+        lr_scheduler.step()
 
         is_best = val_loss < best_loss
         best_loss = min(val_loss, best_loss)
@@ -581,6 +543,8 @@ def main(argv):
                     "optimizer": optimizer.state_dict(),
                     "aux_optimizer": aux_optimizer.state_dict(),
                     "lr_scheduler": lr_scheduler.state_dict(),
+                    "N": args.N,
+                    "M": args.M,
                 },
                 is_best,
                 base_dir

@@ -3,6 +3,8 @@ cd ~/TIC
 pip install -r examples/requirements.txt
 pip install -e .
 
+cd TIC && source .venv/bin/activate && cd examples/onnx
+
 板子上環境建置執行以下指令
 python -m venv .venv
 source .venv/bin/activate
@@ -16,18 +18,34 @@ cd examples
 
 python train.py \
   -m tic \
-  -d ~/TIC/s2_combined \
+  -d /tmp/s2_combined \
   -e 200 \
+  -q 3 \
+  --lambda 0.0108 \
   --batch-size 192 \
   --num-workers 32 \
   --cuda \
   --gpu-id 0 \
-  -q 5 \
   --roi-factor 1.0 \
   --name "mean_scale_no_roi"
 
+
+python student_train.py \
+    -d /tmp/s2_combined \
+    -t /home/asvserver/TIC/TIC/examples/pretrained/tic/3/checkpoint_best_loss.pth.tar \
+    -q 3 \
+    --lambda 0.0108 \
+    --batch-size 320 \
+    --num-workers 32 \
+    --epochs 200 \
+    --cuda \
+    --gpu-id 0 \
+    --name tic_kd_student_lambda0108 \
+    --roi-factor 1.0
+
+
 壓縮端執行
-python dump_cdfs.py
+python dump_cdfs.py -i ./onnx/onnx_models_N32_0108/checkpoint_best_loss.pth.tar
 傳送TIC/examples/fixed_cdfs.py到解壓縮端 確保兩邊檔案相同
 
 執行腳本(調整參數去腳本內部)：
@@ -35,26 +53,58 @@ python dump_cdfs.py
 ./decompress.sh
 
 單獨程式使用：
-python onlycompress.py "../wang_cropped_4097x3072.png" -p "../1130stcheckpoint_best_loss.pth" 
-python onlydecompress.py "output_satellite/wang_cropped_4097x3072" -p "../1130stcheckpoint_best_loss.pth" --original "../wang_cropped_4097x3072.png"
+python onlycompress.py "./GSD_data/GSD30m_Final.tif" -p "./pretrained/tic/3/checkpoint_best_loss.pth.tar" 
+python onlydecompress.py "./output_satellite/GSD50m_Final"  -p "/home/asvserver/TIC/TIC/examples/pretrained/tic/3/checkpoint_best_loss.pth.tar" --original "./GSD_data/GSD50m_Final.tif" 
+
+
+python onlycompress.py "./taiwan/hualien_RGB_Normalized_tile_r0_c0.tif" -p "./pretrained/student/tic_student/q3/checkpoint_best.pth.tar" 
+
+python onlydecompress.py "/home/asvserver/TIC/TIC/examples/output_satellite/hualien_RGB_Normalized_tile_r0_c0"  -p "/home/asvserver/TIC/TIC/examples/pretrained/tic/3/checkpoint_best_loss.pth.tar" --original "/home/asvserver/TIC/TIC/examples/taiwan/hualien_RGB_Normalized_tile_r0_c0.tif" 
 
 ONNX 使用方式 (ARM CPU)
 cd examples/onnx
 
 # 1. 產生原始 ONNX 模型 (從 .pth 轉換)
 python export_onnx.py -p checkpoint_best_loss.pth.tar
+python export_onnx.py -p ./onnx_models_N32_0108/checkpoint_best_loss.pth.tar -o ./onnx_models_N32_0108/
 
 # 2. 進行靜態量化 (INT8) - 在開發機上執行過一次即可
 # 可用單張圖片或資料夾（多圖校準效果更穩定）
 python quantize_static.py --img test.tif --onnx-dir student_onnx
 python quantize_static.py --img /path/to/image_folder --onnx-dir student_onnx --num-patches 500
-
+python quantize_static.py --img /home/asvserver/TIC/s2_combined/train --onnx-dir tic_gdn_student --num-patches 500
 # 3. 壓縮圖片
 # 預設模式 (混合精度)：
 #   - Encoder: INT8
 #   - HyperDecoder: FP32
 python compress.py test.tif --batch 8
 python compress.py test.tif --enc teacher_onnx/tic_encoder_static_int8.onnx --hyper teacher_onnx/tic_hyper_decoder.onnx
+
+#quantize_static
+python compress.py ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --enc 20260203_tic_gdn/tic_encoder_static_int8.onnx --hyper 20260203_tic_gdn/tic_hyper_decoder.onnx --batch 8
+python decompress.py ./output_onnx/hualien_RGB_Normalized_tile_r0_c0 --dec 20260203_tic_gdn/tic_decoder_static_int8.onnx --original ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --brightness 1.5 --hyper 20260203_tic_gdn/tic_hyper_decoder.onnx
+
+~/TIC/examples/Taiwan/Taichung_RGB_Normalized_tile_r1_c1.tif
+Taichung_RGB_Normalized_tile_r1_c2
+Taitung_RGB_Normalized_tile_r2_c0.tif
+
+#N_quantize
+hualien_RGB_Normalized_tile_r0_c0
+Taichung_RGB_Normalized_tile_r2_c1
+Taitung_RGB_Normalized_tile_r1_c0
+Taitung_RGB_Normalized_tile_r2_c0
+
+python compress.py ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --enc onnx_models_N32/tic_encoder.onnx --hyper onnx_models_N32/tic_hyper_decoder.onnx --batch 16
+python compress.py ../Taiwan/Taichung_RGB_Normalized_tile_r2_c1.tif --enc onnx_models_N32/tic_encoder.onnx --hyper onnx_models_N32/tic_hyper_decoder.onnx --batch 16
+python compress.py ../Taiwan/Taitung_RGB_Normalized_tile_r1_c0.tif --enc onnx_models_N32/tic_encoder.onnx --hyper onnx_models_N32/tic_hyper_decoder.onnx --batch 16
+python compress.py ../Taiwan/Taitung_RGB_Normalized_tile_r2_c0.tif --enc onnx_models_N32/tic_encoder.onnx --hyper onnx_models_N32/tic_hyper_decoder.onnx --batch 16
+
+~/TIC/examples/onnx/onnx_models_N128/N128_lambda_0.0108_checkpoint_best.pth.tar
+python decompress.py ./output_onnx/hualien_RGB_Normalized_tile_r0_c0 --dec onnx_models_N32/tic_decoder.onnx --original ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --brightness 1.5 --hyper onnx_models_N32/tic_hyper_decoder.onnx
+python decompress.py ./output_onnx/Taichung_RGB_Normalized_tile_r2_c1 --dec onnx_models_N32/tic_decoder.onnx --original ../Taiwan/Taichung_RGB_Normalized_tile_r2_c1.tif --brightness 1.5 --hyper onnx_models_N32/tic_hyper_decoder.onnx
+python decompress.py ./output_onnx/Taitung_RGB_Normalized_tile_r1_c0 --dec onnx_models_N32/tic_decoder.onnx --original ../Taiwan/Taitung_RGB_Normalized_tile_r1_c0.tif --brightness 1.5 --hyper onnx_models_N32/tic_hyper_decoder.onnx
+python decompress.py ./output_onnx/Taitung_RGB_Normalized_tile_r2_c0 --dec onnx_models_N32/tic_decoder.onnx --original ../Taiwan/Taitung_RGB_Normalized_tile_r2_c0.tif --brightness 1.5 --hyper onnx_models_N32/tic_hyper_decoder.onnx
+
 
 # 4. 解壓縮
 # 預設模式 (高品質)：

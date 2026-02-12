@@ -2,9 +2,9 @@
 ONNX Export Tool for TIC Model
 
 This script exports the TIC model to three ONNX files:
-1. tic_encoder.onnx      - Image encoder (g_a + h_a)
+1. tic_encoder.onnx       - Image encoder (g_a + h_a)
 2. tic_hyper_decoder.onnx - Hyperprior decoder (h_s)
-3. tic_decoder.onnx      - Image decoder (g_s)
+3. tic_decoder.onnx       - Image decoder (g_s)
 
 Usage:
     python export_onnx.py -p /path/to/checkpoint.pth.tar [-o output_dir]
@@ -23,7 +23,10 @@ EXAMPLES_DIR = os.path.dirname(SCRIPT_DIR)
 ROOT_DIR = os.path.dirname(EXAMPLES_DIR)
 sys.path.insert(0, ROOT_DIR)
 
-from compressai.models.tic import TIC, TIC_Student
+# ==============================================================================
+# 修改點 1: 只引用 TIC，因為現在 TIC 已經是通用類別了
+# ==============================================================================
+from compressai.models.tic import TIC
 
 
 # ==============================================================================
@@ -74,7 +77,7 @@ class NetDecoder(nn.Module):
 # ==============================================================================
 
 def load_checkpoint(checkpoint_path, device='cpu'):
-    """Load TIC or TIC_Student model from checkpoint."""
+    """Load TIC model (Student or Teacher) from checkpoint."""
     print(f"Loading checkpoint: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location=device)
     
@@ -90,25 +93,34 @@ def load_checkpoint(checkpoint_path, device='cpu'):
         name = k[7:] if k.startswith('module.') else k
         new_state_dict[name] = v
 
-    # Infer N and M from weights
-    N = new_state_dict.get('g_a.0.weight', torch.zeros(128, 3, 5, 5)).size(0)
+    # ==============================================================================
+    # 修改點 2: 自動偵測 N 和 M，並使用通用的 TIC 類別實例化
+    # ==============================================================================
+    # 嘗試從權重中推斷 N (g_a 第一層的輸出通道數)
+    # g_a.0.weight 的 shape 是 [Out_Channels, In_Channels, K, K] -> [N, 3, 5, 5]
+    if 'g_a.0.weight' in new_state_dict:
+        N = new_state_dict['g_a.0.weight'].size(0)
+    else:
+        print("Warning: Could not infer N from state_dict, defaulting to 128")
+        N = 128
+
+    # 嘗試從權重中推斷 M (g_a 最後一層的輸出通道數)
+    # g_a.6.weight 的 shape 是 [M, N, 5, 5]
     M = 192  # Default
     try:
+        # 找出 g_a 所有層的 weight key
         keys = sorted([k for k in new_state_dict.keys() if 'g_a' in k and 'weight' in k])
         if keys:
+            # 最後一層通常是 g_a.6 (或是最後一個 index)
             M = new_state_dict[keys[-1]].size(0)
-    except:
+    except Exception as e:
+        print(f"Warning: Could not infer M from state_dict ({e}), defaulting to 192")
         pass
     
-    print(f"Model parameters: N={N}, M={M}")
+    print(f"Detected Model Configuration: N={N}, M={M}")
     
-    # Choose model class based on N
-    if N == 64:
-        print("Detected TIC_Student model (N=64)")
-        model = TIC_Student(N=N, M=M)
-    else:
-        print("Detected TIC teacher model")
-        model = TIC(N=N, M=M)
+    # 直接初始化 TIC，無論是 Teacher(128), Student(64), Tiny(32) 都適用
+    model = TIC(N=N, M=M)
     
     model.load_state_dict(new_state_dict, strict=True)
     model.eval()
@@ -123,9 +135,9 @@ def export_onnx(checkpoint_path, output_dir, input_size=256, opset_version=17):
     # Load model
     full_model = load_checkpoint(checkpoint_path, device)
     
-    # Get model parameters
-    N = full_model.entropy_bottleneck.channels
-    M = full_model.g_a[-1].out_channels if hasattr(full_model.g_a[-1], 'out_channels') else 192
+    # Get model parameters for dummy input
+    N = full_model.N
+    M = full_model.M
     
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -209,8 +221,9 @@ def export_onnx(checkpoint_path, output_dir, input_size=256, opset_version=17):
     print(f"Files created:")
     for f in ["tic_encoder.onnx", "tic_hyper_decoder.onnx", "tic_decoder.onnx"]:
         fpath = os.path.join(output_dir, f)
-        size_mb = os.path.getsize(fpath) / (1024 * 1024)
-        print(f"  - {f} ({size_mb:.2f} MB)")
+        if os.path.exists(fpath):
+            size_mb = os.path.getsize(fpath) / (1024 * 1024)
+            print(f"  - {f} ({size_mb:.2f} MB)")
     print("\nNext steps:")
     print("1. Generate fixed_cdfs.py using dump_cdfs.py with the same checkpoint")
     print("2. Use nxinfcom.py to compress images")
