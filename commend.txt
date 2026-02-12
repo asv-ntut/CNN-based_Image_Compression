@@ -78,7 +78,7 @@ python quantize_static.py --img /home/asvserver/TIC/s2_combined/train --onnx-dir
 #   - Encoder: INT8
 #   - HyperDecoder: FP32
 python compress.py test.tif --batch 8
-python compress.py test.tif --enc teacher_onnx/tic_encoder_static_int8.onnx --hyper teacher_onnx/tic_hyper_decoder.onnx
+python compress.py test.tif --enc teacher_onnx/tic_encoder_static_int8.onnx --hyper teacher_onnx/tic_hyper_decoder.onnx --profile
 
 #quantize_static
 python compress.py ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --enc 20260203_tic_gdn/tic_encoder_static_int8.onnx --hyper 20260203_tic_gdn/tic_hyper_decoder.onnx --batch 8
