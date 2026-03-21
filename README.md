@@ -66,32 +66,31 @@ python setup.py build_ext --inplace
 
 ```bash
 # 提取特定 lambda 版本的 CDFs
-python cdfs/dump_cdfs.py -i ~/TIC_CPP/cdfs/pth/d_N32/lambda0.0108/distilled_N32_lambda_0.0108_checkpoint_best.pth.tar -o Inference/fixed_cdfs.py
+python dump_cdfs.py -i <path_to_specific_lambda_checkpoint.pth.tar> -o fixed_cdfs.py
 
 # 或提取最佳權重的 CDFs
-python cdfs/dump_cdfs.py -i ~/TIC_CPP/cdfs/pth/best.pth.tar -o Inference/fixed_cdfs.py
+python dump_cdfs.py -i <path_to_best_checkpoint.pth.tar> -o fixed_cdfs.py
 ```
 
 ### 2. 執行影像壓縮 (Compress)
-切換到 `Inference` 目錄下（視你的實際架構而定），將原始衛星影像（`.tif`）壓縮為二進位串流：
+切換到你存放推論程式碼的目錄下，將原始影像（例如 `.tif` 或 `.png`）壓縮為二進位串流：
 
 ```bash
-cd Inference
-
-python compress.py Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif \
-    --enc onnx/onnx_models_d_N32_0108/tic_encoder.onnx \
-    --hyper onnx/onnx_models_d_N32_0108/tic_hyper_decoder.onnx \
+python compress.py <input_image.tif> \
+    --enc <path_to_onnx_encoder.onnx> \
+    --hyper <path_to_onnx_hyper_decoder.onnx> \
     --batch 64
 ```
+*(執行完畢後，將會在指定的輸出資料夾中產生壓縮後的二進位檔案。)*
 
 ### 3. 執行影像解壓縮 (Decompress)
-將壓縮產生的檔案還原為影像，並可透過 `--original` 參數帶入原圖以計算 PSNR / MS-SSIM 等重建品質指標：
+將壓縮產生的檔案還原為影像。若需評估壓縮成效，可透過 `--original` 參數帶入原圖，系統將自動計算 PSNR / MS-SSIM 等重建品質指標：
 
 ```bash
-python decompress.py output/hualien_RGB_Normalized_tile_r0_c0 \
-    --dec onnx/onnx_models_d_N32_0108/tic_decoder.onnx \
-    --hyper onnx/onnx_models_d_N32_0108/tic_hyper_decoder.onnx \
-    --original Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif 
+python decompress.py <compressed_bin_file_prefix> \
+    --dec <path_to_onnx_decoder.onnx> \
+    --hyper <path_to_onnx_hyper_decoder.onnx> \
+    --original <original_input_image.tif> 
 ```
 
 ---
@@ -100,5 +99,5 @@ python decompress.py output/hualien_RGB_Normalized_tile_r0_c0 \
 
 * `src/compressai/`: 核心模型架構、熵編碼邏輯與 C++ 擴充模組原始碼 (`cpp_exts/`)。
 * `src/ryg_rans/`: 外部依賴的高效能 rANS (Range Asymmetric Numeral System) C++ 函式庫。
-* `scripts/` (或 `Inference/`): 執行模型壓縮、解壓縮與權重轉換的主程式腳本。
+* `scripts/`: 執行模型壓縮、解壓縮與權重轉換的主程式腳本。
 * `setup.sh` / `setup.py`: 負責自動化環境建置與 C++ 綁定編譯。
