@@ -1,32 +1,3 @@
-# Copyright (c) 2021-2022, InterDigital Communications, Inc
-# All rights reserved.
-
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted (subject to the limitations in the disclaimer
-# below) provided that the following conditions are met:
-
-# * Redistributions of source code must retain the above copyright notice,
-#   this list of conditions and the following disclaimer.
-# * Redistributions in binary form must reproduce the above copyright notice,
-#   this list of conditions and the following disclaimer in the documentation
-#   and/or other materials provided with the distribution.
-# * Neither the name of InterDigital Communications, Inc nor the names of its
-#   contributors may be used to endorse or promote products derived from this
-#   software without specific prior written permission.
-
-# NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
-# THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
-# CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT
-# NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-# PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 import os
 import subprocess
 
@@ -51,7 +22,7 @@ except (FileNotFoundError, subprocess.CalledProcessError):
 
 
 def write_version_file():
-    path = cwd / package_name / "version.py"
+    path = cwd / "src" / package_name / "version.py"
     with path.open("w") as f:
         f.write(f'__version__ = "{version}"\n')
         f.write(f'git_version = "{git_hash}"\n')
@@ -61,18 +32,26 @@ write_version_file()
 
 
 def get_extensions():
-    ext_dirs = cwd / package_name / "cpp_exts"
+    ext_dirs = cwd / "src" / package_name / "cpp_exts"
     ext_modules = []
 
     # Add rANS module
-    rans_lib_dir = cwd / "third_party/ryg_rans"
+    rans_lib_dir = cwd / "src" / "ryg_rans"
     rans_ext_dir = ext_dirs / "rans"
 
     extra_compile_args = ["-std=c++17"]
     if os.getenv("DEBUG_BUILD", None):
         extra_compile_args += ["-O0", "-g", "-UNDEBUG"]
     else:
-        extra_compile_args += ["-O3"]
+        # 🚀 [修改點] 針對 PetaLinux (ARM Cortex-A53) 的編譯器最佳化參數
+        extra_compile_args += [
+            "-O3",                   # 最高層級的執行速度最佳化
+            "-mcpu=cortex-a53",      # 指定目標 CPU 架構，開啟對應的硬體指令
+            "-mtune=cortex-a53",     # 針對 Cortex-A53 管線進行指令排程最佳化
+            "-ftree-vectorize",      # 強制將迴圈展開並轉換為 NEON 向量指令 (SIMD)
+            "-ffast-math"            # 放寬 IEEE 浮點數標準，換取極致的運算速度
+        ]
+
     ext_modules.append(
         Pybind11Extension(
             name=f"{package_name}.ans",
@@ -126,7 +105,8 @@ setup(
     url="https://github.com/InterDigitalInc/CompressAI",
     author="InterDigital AI Lab",
     author_email="compressai@interdigital.com",
-    packages=find_packages(exclude=("tests",)),
+    package_dir={"": "src"},
+    packages=find_packages(where="src", exclude=("tests",)),
     zip_safe=False,
     python_requires=">=3.6",
     install_requires=[

@@ -1,0 +1,28 @@
+cd CNN-based_Image_compression/scripts && source ../.venv/bin/activate
+
+python 2way_compress.py ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --enc onnx_models_d_N32/tic_encoder.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --batch 64
+python 2way_compress.py ../Taiwan/Taichung_RGB_Normalized_tile_r2_c1.tif --enc onnx_models_d_N32/tic_encoder.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --batch 64
+python 2way_compress.py ../Taiwan/Taitung_RGB_Normalized_tile_r1_c0.tif --enc onnx_models_d_N32/tic_encoder.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --batch 64
+python 2way_compress.py ../Taiwan/Taitung_RGB_Normalized_tile_r2_c0.tif --enc onnx_models_d_N32/tic_encoder.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --batch 64
+
+python 2way_decompress.py ./output_onnx/hualien_RGB_Normalized_tile_r0_c0 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --brightness 1.5 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
+python 2way_decompress.py ./output_onnx/Taichung_RGB_Normalized_tile_r2_c1 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/Taichung_RGB_Normalized_tile_r2_c1.tif --brightness 1.5 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
+python 2way_decompress.py ./output_onnx/Taitung_RGB_Normalized_tile_r1_c0 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/Taitung_RGB_Normalized_tile_r1_c0.tif --brightness 1.5 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
+python 2way_decompress.py ./output_onnx/Taitung_RGB_Normalized_tile_r2_c0 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/Taitung_RGB_Normalized_tile_r2_c0.tif --brightness 1.5 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
+python 2way_decompress.py ./output_onnx/Taichung_RGB_Normalized_tile_r0_c1 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/Taichung_RGB_Normalized_tile_r0_c1.tif --brightness 1.5 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
+python 2way_decompress.py ./output_onnx/Taichung_RGB_Normalized_tile_r2_c1 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/Taichung_RGB_Normalized_tile_r2_c1.tif --brightness 1.5 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
+
+python compress.py ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --enc onnx_models_d_N32/tic_encoder_static_int8.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --batch 64
+python decompress.py ./output_onnx/hualien_RGB_Normalized_tile_r0_c0 --dec onnx_models_d_N32/tic_decoder_static_int8.onnx --original ../Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --brightness 1.5 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
+
+
+
+python batch_compress.py -i ../Taiwan/ --out ./output_onnx --enc onnx_models_d_N32/tic_encoder.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --batch 64
+python batch_decompress.py -i ./output_onnx --orig_dir ../Taiwan --out_png ./reconstructed_images --csv decompression_results.csv --dec onnx_models_d_N32/tic_decoder.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --brightness 1.5 --workers 4 --cpu
+
+
+
+
+python 2way_decompress.py ./output_onnx/Taichung_RGB_Normalized_tile_r2_c1 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/Taichung_RGB_Normalized_tile_r2_c1.tif --hyper onnx_models_d_N32/tic_hyper_decoder.onnx -o ./Taichung_RGB_Normalized_tile_r2_c1.png
+python 2way_decompress.py ./output_onnx/Tainan_RGB_Normalized_tile_r1_c1 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/Tainan_RGB_Normalized_tile_r1_c1.tif --hyper onnx_models_d_N32/tic_hyper_decoder.onnx -o Tainan_RGB_Normalized_tile_r1_c1.png
+python 2way_decompress.py ./output_onnx/Kaohsiung_RGB_Normalized_tile_r0_c0 --dec onnx_models_d_N32/tic_decoder.onnx --original ../Taiwan/Kaohsiung_RGB_Normalized_tile_r0_c0.tif --hyper onnx_models_d_N32/tic_hyper_decoder.onnx -o Kaohsiung_RGB_Normalized_tile_r0_c0.png
