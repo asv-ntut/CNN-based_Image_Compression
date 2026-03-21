@@ -1,0 +1,23 @@
+# --- Deep Learning & Math ---
+torch
+torchvision
+numpy
+scipy
+timm
+
+# --- Image Processing ---
+Pillow
+tifffile
+pytorch-msssim
+
+# --- ONNX Inference ---
+onnx>=1.14.0
+onnxruntime>=1.16.0
+
+# --- Compression & Utils ---
+zlib-state
+
+# --- C++ Binding  ---
+pybind11>=2.6.1
+setuptools>=42
+wheel
