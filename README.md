@@ -76,7 +76,7 @@ python dump_cdfs.py -i <path_to_best_checkpoint.pth.tar> -o fixed_cdfs.py
 切換到你存放推論程式碼的目錄下，將原始影像（例如 `.tif` 或 `.png`）壓縮為二進位串流：
 
 ```bash
-python compress.py <input_image.tif> \
+python 2way_compress.py <input_image.tif> \
     --enc <path_to_onnx_encoder.onnx> \
     --hyper <path_to_onnx_hyper_decoder.onnx> \
     --batch 64
@@ -87,7 +87,7 @@ python compress.py <input_image.tif> \
 將壓縮產生的檔案還原為影像。若需評估壓縮成效，可透過 `--original` 參數帶入原圖，系統將自動計算 PSNR / MS-SSIM 等重建品質指標：
 
 ```bash
-python decompress.py <compressed_bin_file_prefix> \
+python 2way_decompress.py <compressed_bin_file_prefix> \
     --dec <path_to_onnx_decoder.onnx> \
     --hyper <path_to_onnx_hyper_decoder.onnx> \
     --original <original_input_image.tif> 
