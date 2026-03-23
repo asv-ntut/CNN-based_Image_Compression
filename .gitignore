@@ -1,0 +1,15 @@
+# 虛擬環境與編譯檔
+.venv/
+build/
+__pycache__/
+*.so
+
+# 模型與資料檔 (通常太大不進 Git，或另外放 LFS)
+*.onnx
+*.tif
+*.bin
+*.raw
+
+# 其他暫存檔
+.DS_Store
+EOT
