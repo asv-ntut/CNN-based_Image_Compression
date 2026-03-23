@@ -123,7 +123,7 @@ void trigger_ai_worker(int mode, const char* file_path) {
     }
 
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        printf("連線失敗：AI Worker 似乎沒有啟動，請確認 compress.py 是否在背景運行。\n");
+        printf("連線失敗:AI Worker 似乎沒有啟動，請確認 compress.py 是否在背景運行。\n");
         close(sock);
         return;
     }

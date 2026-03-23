@@ -22,12 +22,12 @@ else
 fi
 
 # 3. 於背景啟動 Python AI Worker (監聽本機 Port 6000)
-# 註: 模型路徑指向 d_N32 版本，batch 設為 16 保護 A53 記憶體
+# 註: 模型路徑指向 d_N32 版本,batch 設為 16 保護 A53 記憶體
 echo "啟動背景 AI Worker..."
-python compress.py \
+python ./scripts/compress.py \
     --enc "$PROJECT_DIR/scripts/onnx_models_d_N32/tic_encoder.onnx" \
     --hyper "$PROJECT_DIR/scripts/onnx_models_d_N32/tic_hyper_decoder.onnx" \
-    --batch 16 \
+    --batch 64 \
     --workers 4 \
     --comm_ip 127.0.0.1 &
 
