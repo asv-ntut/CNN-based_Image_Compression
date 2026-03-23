@@ -6,7 +6,7 @@ set -e
 echo "開始建置 CNN-Based Image Compression 專案環境..."
 
 # 1. 切換到專案目錄
-cd ~/CNN-based_Image_compression
+cd $(pwd)
 echo "目前路徑: $(pwd)"
 
 # 2. 建立虛擬環境
