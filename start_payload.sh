@@ -1,6 +1,7 @@
 #!/bin/bash
 echo "🚀 啟動 TIC 衛星影像壓縮酬載服務..."
-
+#錯誤時請先輸入
+# sed -i 's/\r$//' start_payload.sh
 # 1. 切換至專案絕對路徑 (使用 $HOME 確保背景執行時路徑正確)
 PROJECT_DIR="$HOME/CNN-based_Image_compression"
 
