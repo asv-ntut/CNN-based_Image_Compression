@@ -91,3 +91,10 @@ chmod +x start_payload.sh
 ./start_payload.sh
 ```
 注意： 啟動前台 C Dispatcher 可能需要 sudo 權限才能讀取 UART Port (/dev/ttyUSB0)。
+
+
+OBC執行
+```bash
+echo "START <任務模式 (Mode ID)> <image_path>" > /dev/ttyUSB0
+echo "START 2 ../../Taiwan/Kaohsiung_RGB_Normalized_tile_r0_c0.tif" > /dev/ttyUSB0
+```
