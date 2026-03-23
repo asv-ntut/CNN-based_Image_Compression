@@ -81,8 +81,13 @@ gcc dispatcher.c -o dispatcher
 ```
 ## 5. 系統啟動與執行腳本 (System Startup)
 環境建置完成後，後續每次開機只需透過啟動腳本執行即可。請建立 start_payload.sh 腳本，並強烈建議將其設定為開機自動執行。
+
 給予執行腳本權限：
 ```bash
 chmod +x start_payload.sh
+```
+一鍵啟動系統
+```bash
+./start_payload.sh
 ```
 注意： 啟動前台 C Dispatcher 可能需要 sudo 權限才能讀取 UART Port (/dev/ttyUSB0)。
