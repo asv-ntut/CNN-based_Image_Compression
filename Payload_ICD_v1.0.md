@@ -95,6 +95,6 @@ chmod +x start_payload.sh
 
 OBC執行
 ```bash
-echo "START <任務模式 (Mode ID)> <image_path>" > /dev/ttyUSB0
+# echo "START <任務模式 (Mode ID)> <image_path>" > /dev/ttyUSB0
 echo "START 2 ../../Taiwan/Kaohsiung_RGB_Normalized_tile_r0_c0.tif" > /dev/ttyUSB0
 ```
