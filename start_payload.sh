@@ -2,8 +2,9 @@
 echo "🚀 啟動 TIC 衛星影像壓縮酬載服務..."
 #錯誤時請先輸入
 # sed -i 's/\r$//' start_payload.sh
+
 # 1. 切換至專案絕對路徑 (使用 $HOME 確保背景執行時路徑正確)
-PROJECT_DIR="$HOME/CNN-based_Image_compression"
+PROJECT_DIR="$(pwd)"
 
 # 檢查目錄是否存在，避免路徑錯誤導致腳本盲目執行
 if [ -d "$PROJECT_DIR" ]; then
@@ -39,4 +40,7 @@ sleep 5
 # 4. 於前台啟動 C Dispatcher 監聽 OBC UART 訊號
 echo "📡 啟動 UART 監聽接口 (Dispatcher)..."
 # 注意：讀取 /dev/ttyUSB0 通常需要 sudo 權限
-sudo ./dispatcher
+#sudo ./dispatcher
+./dispatcher
+
+#執行 echo "START 2 ../../Taiwan/Kaohsiung_RGB_Normalized_tile_r0_c0.tif" > /tmp/ttyVIRTUAL
