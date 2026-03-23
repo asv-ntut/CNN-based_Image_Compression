@@ -1,5 +1,6 @@
 #!/bin/bash
-
+#錯誤時請先輸入
+# sed -i 's/\r$//' setup.sh
 # 設定腳本只要遇到錯誤就立刻停止
 set -e
 
