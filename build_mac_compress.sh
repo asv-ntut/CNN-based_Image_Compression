@@ -6,9 +6,6 @@ echo "Starting native compilation for tic_compress on MacOS..."
 ORT_PATH=$(brew --prefix onnxruntime)
 OPENCV_PATH=$(brew --prefix opencv)
 
-# 1. 移除 -ffast-math 以維持跨平台精度一致
-# 2. 加入 -Wl,-rpath 自動連結 runtime library
-# 3. 加入 -funsigned-char 對齊 char 行為
 clang++ -O3 -Wall -Wextra -lz -std=c++17 -funsigned-char \
     compress.cpp -o compress \
     -I./cpp_lib/eigen3 \
