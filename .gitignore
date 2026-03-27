@@ -46,3 +46,4 @@ compressed_bins
 build_arm64.sh
 compress
 decompress
+output/
