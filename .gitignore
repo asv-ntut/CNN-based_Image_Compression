@@ -5,7 +5,6 @@ __pycache__/
 *.so
 
 # 模型與資料檔 (通常太大不進 Git，或另外放 LFS)
-*.onnx
 *.tif
 *.bin
 *.raw
@@ -43,4 +42,7 @@ Thumbs.db
 
 
 Taiwan/
-commend.md
+compressed_bins
+build_arm64.sh
+compress
+decompress

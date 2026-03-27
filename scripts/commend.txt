@@ -1,7 +1,0 @@
-cd CNN-based_Image_compression/scripts && source ../.venv/bin/activate
-
-python 2way_compress.py ~/Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --enc onnx_models_d_N32/tic_encoder.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --batch 64
-python 2way_compress.py ~/Taiwan/Taichung_RGB_Normalized_tile_r2_c1.tif --enc onnx_models_d_N32/tic_encoder.onnx --hyper onnx_models_d_N32/tic_hyper_decoder.onnx --batch 64
-
-python 2way_decompress.py ./output_onnx/hualien_RGB_Normalized_tile_r0_c0 --dec onnx_models_d_N32/tic_decoder.onnx --original ~/Taiwan/hualien_RGB_Normalized_tile_r0_c0.tif --brightness 2 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
-python 2way_decompress.py ./output_onnx/Taichung_RGB_Normalized_tile_r2_c1 --dec onnx_models_d_N32/tic_decoder.onnx --original ~/Taiwan/Taichung_RGB_Normalized_tile_r2_c1.tif --brightness 1.5 --hyper onnx_models_d_N32/tic_hyper_decoder.onnx
