@@ -17,7 +17,6 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from compressai.datasets import ImageFolder
-# 假設你的專案結構中有這個 module
 from compressai.models.cic import build_model 
 import wandb
 

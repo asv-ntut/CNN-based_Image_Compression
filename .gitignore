@@ -2,10 +2,8 @@
 .venv/
 build/
 __pycache__/
-*.so
 
 # 模型與資料檔 (通常太大不進 Git，或另外放 LFS)
-*.tif
 *.bin
 *.raw
 
@@ -43,7 +41,4 @@ Thumbs.db
 
 Taiwan/
 compressed_bins
-build_arm64.sh
-compress
-decompress
 output/
