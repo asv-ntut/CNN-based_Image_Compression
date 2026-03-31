@@ -11,12 +11,14 @@
 #include <cmath>
 #include <string>
 #include <sstream>
+#include <cstdlib>
 #include <zlib.h> 
 
 #include <termios.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <string.h>
 
 #include <onnxruntime_cxx_api.h>
 #include <opencv2/opencv.hpp>
@@ -41,6 +43,78 @@ struct CICPacketHeader {
 };
 #pragma pack(pop)
 
+// ---------------------------------------------------------
+// OBC UART Communication Wrapper
+// ---------------------------------------------------------
+class OBCInterface {
+private:
+    int uart_fd;
+    std::string device_path;
+    std::string rx_buffer;
+
+public:
+    OBCInterface(const std::string& dev) : device_path(dev), uart_fd(-1), rx_buffer("") {}
+
+    bool init() {
+        uart_fd = open(device_path.c_str(), O_RDWR | O_NOCTTY | O_NDELAY);
+        if (uart_fd == -1) {
+            return false;
+        }
+
+        struct termios options;
+        tcgetattr(uart_fd, &options);
+        cfsetispeed(&options, B115200);
+        cfsetospeed(&options, B115200);
+
+        // RAW mode setup
+        options.c_cflag &= ~PARENB;
+        options.c_cflag &= ~CSTOPB;
+        options.c_cflag &= ~CSIZE;
+        options.c_cflag |= CS8;
+        options.c_cflag |= (CLOCAL | CREAD);
+        options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+        options.c_oflag &= ~OPOST;
+        options.c_iflag &= ~(IXON | IXOFF | IXANY);
+
+        options.c_cc[VMIN] = 0;
+        options.c_cc[VTIME] = 5; 
+
+        tcsetattr(uart_fd, TCSANOW, &options);
+        fcntl(uart_fd, F_SETFL, O_NDELAY); 
+        return true;
+    }
+
+    void close_port() {
+        if (uart_fd >= 0) {
+            close(uart_fd);
+            uart_fd = -1;
+        }
+    }
+
+    void send_msg(const std::string& msg) {
+        if (uart_fd >= 0) {
+            write(uart_fd, msg.c_str(), msg.length());
+        }
+    }
+
+    std::string read_line() {
+        char c;
+        while (read(uart_fd, &c, 1) > 0) {
+            if (c == '\n') {
+                std::string complete_cmd = rx_buffer;
+                rx_buffer.clear();
+                return complete_cmd;
+            } else if (c != '\r') {
+                rx_buffer += c;
+            }
+        }
+        return "";
+    }
+};
+
+// ---------------------------------------------------------
+// Core Compression Logic
+// ---------------------------------------------------------
 void extract_patch_to_buffer(const cv::Mat& img_float, float* buffer_ptr, int r, int c, int ps) {
     int s_h = r * ps, s_w = c * ps;
     int v_h = std::min(ps, img_float.rows - s_h);
@@ -60,16 +134,8 @@ void extract_patch_to_buffer(const cv::Mat& img_float, float* buffer_ptr, int r,
     }
 }
 
-// [修正 1] 同步將訊息印到螢幕上，並移除會讓 FIFO 報錯的 tcdrain
-void send_uart_msg(int fd, const std::string& msg) {
-    std::cout << msg; 
-    if (fd >= 0) {
-        write(fd, msg.c_str(), msg.length());
-    }
-}
-
 struct SharedORTResource {
-    Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "CIC_Final"};
+    Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "CIC_Payload"};
     Ort::SessionOptions options;
     std::unique_ptr<Ort::Session> enc_sess;
     std::unique_ptr<Ort::Session> hyp_sess;
@@ -87,49 +153,58 @@ struct SharedORTResource {
     }
 };
 
-bool process_image(int uart_fd, const std::string& tif_path, const std::string& base_bin_dir, std::string& out_final_dir, bool show_stats) {
-    try {
-        auto t_start = std::chrono::high_resolution_clock::now();
-        size_t total_compressed_bytes = 0;
+struct CompressionResult {
+    bool success;
+    int total_patches;
+    int success_patches;
+    size_t total_bytes;
+    std::string output_dir;
+    std::string error_msg;
+};
 
+CompressionResult process_image(const std::string& tif_path, const std::string& base_bin_dir) {
+    CompressionResult result = {false, 0, 0, 0, "", ""};
+    
+    try {
         const std::string MODEL_ENCODER = "./model/onnx/cic_encoder.onnx";
         const std::string MODEL_HYPER_DECODER = "./model/onnx/cic_hyper_decoder.onnx";
         int ENC_BATCH = 4;
         int HYP_BATCH = ENC_BATCH * 4;
 
         std::string file_stem = fs::path(tif_path).stem().string();
-        out_final_dir = (fs::path(base_bin_dir) / file_stem).string();
-        if (!fs::exists(out_final_dir)) fs::create_directories(out_final_dir);
+        result.output_dir = (fs::path(base_bin_dir) / file_stem).string();
+        if (!fs::exists(result.output_dir)) {
+            fs::create_directories(result.output_dir);
+        }
 
-        send_uart_msg(uart_fd, "STATUS: LOADING_IMAGE\n");
         cv::Mat img = cv::imread(tif_path, cv::IMREAD_COLOR | cv::IMREAD_ANYDEPTH);
-        if (img.empty()) throw std::runtime_error("Cannot read image: " + tif_path);
+        if (img.empty()) {
+            throw std::runtime_error("Cannot read image");
+        }
         cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
         cv::Mat img_f; img.convertTo(img_f, CV_32FC3, 1.0/255.0);
 
         int ps = 256;
         int nr = (img_f.rows + ps - 1) / ps, nc = (img_f.cols + ps - 1) / ps;
-        int total_patches = nr * nc;
+        result.total_patches = nr * nc;
 
-        send_uart_msg(uart_fd, "STATUS: INIT_MODELS\n");
         SharedORTResource res(MODEL_ENCODER, MODEL_HYPER_DECODER);
         PureDynamicRansEncoder2Way rans;
         auto m_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-        std::vector<AlignedVector<float>> all_y_raw(total_patches, AlignedVector<float>(192*16*16));
-        std::vector<AlignedVector<float>> all_z_hat(total_patches, AlignedVector<float>(32*4*4));
-        std::vector<AlignedVector<int32_t>> all_z_sym(total_patches, AlignedVector<int32_t>(32*4*4));
-        std::vector<AlignedVector<float>> all_scales(total_patches, AlignedVector<float>(192*16*16));
-        std::vector<AlignedVector<float>> all_means(total_patches, AlignedVector<float>(192*16*16));
+        std::vector<AlignedVector<float>> all_y_raw(result.total_patches, AlignedVector<float>(192*16*16));
+        std::vector<AlignedVector<float>> all_z_hat(result.total_patches, AlignedVector<float>(32*4*4));
+        std::vector<AlignedVector<int32_t>> all_z_sym(result.total_patches, AlignedVector<int32_t>(32*4*4));
+        std::vector<AlignedVector<float>> all_scales(result.total_patches, AlignedVector<float>(192*16*16));
+        std::vector<AlignedVector<float>> all_means(result.total_patches, AlignedVector<float>(192*16*16));
 
-        std::vector<AlignedVector<float>> patches_raw(total_patches, AlignedVector<float>(3*ps*ps));
-        for (int i = 0; i < total_patches; ++i) {
+        std::vector<AlignedVector<float>> patches_raw(result.total_patches, AlignedVector<float>(3*ps*ps));
+        for (int i = 0; i < result.total_patches; ++i) {
             extract_patch_to_buffer(img_f, patches_raw[i].data(), i / nc, i % nc, ps);
         }
 
-        send_uart_msg(uart_fd, "STATUS: ENCODING\n");
-        for (int i = 0; i < total_patches; i += ENC_BATCH) {
-            int cur_batch = std::min(ENC_BATCH, total_patches - i);
+        for (int i = 0; i < result.total_patches; i += ENC_BATCH) {
+            int cur_batch = std::min(ENC_BATCH, result.total_patches - i);
             AlignedVector<float> stacked_in(cur_batch * 3 * ps * ps);
             for (int b = 0; b < cur_batch; ++b) {
                 std::copy(patches_raw[i+b].begin(), patches_raw[i+b].end(), stacked_in.begin() + b*(3*ps*ps));
@@ -147,9 +222,8 @@ bool process_image(int uart_fd, const std::string& tif_path, const std::string& 
             }
         }
 
-        send_uart_msg(uart_fd, "STATUS: HYPER_DECODING\n");
-        for (int i = 0; i < total_patches; i += HYP_BATCH) {
-            int cur_batch = std::min(HYP_BATCH, total_patches - i);
+        for (int i = 0; i < result.total_patches; i += HYP_BATCH) {
+            int cur_batch = std::min(HYP_BATCH, result.total_patches - i);
             AlignedVector<float> stacked_z(cur_batch * 32 * 4 * 4);
             for (int b = 0; b < cur_batch; ++b) {
                 std::copy(all_z_hat[i+b].begin(), all_z_hat[i+b].end(), stacked_z.begin() + b*(32*4*4));
@@ -166,11 +240,7 @@ bool process_image(int uart_fd, const std::string& tif_path, const std::string& 
             }
         }
 
-        send_uart_msg(uart_fd, "STATUS: ENTROPY_AND_SAVE\n");
-        int successful_patches = 0;
-        int failed_patches = 0;
-
-        for (int i = 0; i < total_patches; ++i) {
+        for (int i = 0; i < result.total_patches; ++i) {
             try {
                 AlignedVector<int32_t> y_sym(192*16*16), y_idx(192*16*16);
                 quantize_and_index_y_a53(all_y_raw[i].data(), all_scales[i].data(), all_means[i].data(), 
@@ -193,147 +263,89 @@ bool process_image(int uart_fd, const std::string& tif_path, const std::string& 
                 uint32_t crc = crc32(0L, full_payload.data(), full_payload.size());
                 full_payload.insert(full_payload.end(), (uint8_t*)&crc, (uint8_t*)&crc + 4);
 
-                std::string fpath = out_final_dir + "/patch_" + std::to_string(i) + ".bin";
+                std::string fpath = result.output_dir + "/patch_" + std::to_string(i) + ".bin";
                 std::ofstream f(fpath, std::ios::binary);
                 f.write((char*)full_payload.data(), full_payload.size());
                 
                 if (f.good()) {
-                    successful_patches++;
-                    total_compressed_bytes += full_payload.size();
-                } else {
-                    failed_patches++;
+                    result.success_patches++;
+                    result.total_bytes += full_payload.size();
                 }
                 f.close();
-            } catch (const std::exception& e) {
-                failed_patches++;
+            } catch (...) {
+                continue;
             }
         }
 
-        std::ostringstream p_ss;
-        p_ss << "STATUS: PATCH_RESULT TOTAL=" << total_patches 
-             << " SUCCESS=" << successful_patches 
-             << " FAIL=" << failed_patches << "\n";
-        send_uart_msg(uart_fd, p_ss.str());
+        result.success = (result.success_patches == result.total_patches);
+        return result;
 
-        if (show_stats) {
-            auto t_end = std::chrono::high_resolution_clock::now();
-            double total_time = std::chrono::duration<double>(t_end - t_start).count();
-            double total_pixels = (double)img.cols * img.rows;
-            double avg_bpp = ((double)total_compressed_bytes * 8.0) / total_pixels;
-            
-            std::ostringstream ss;
-            ss << "STATS: TIME=" << std::fixed << std::setprecision(4) << total_time 
-               << " BPP=" << std::fixed << std::setprecision(4) << avg_bpp << "\n";
-            send_uart_msg(uart_fd, ss.str());
-        }
-
-        return true;
     } catch (const std::exception& e) {
-        std::cerr << "Compression Error: " << e.what() << "\n";
-        send_uart_msg(uart_fd, std::string("ERROR: ") + e.what() + "\n");
-        return false;
+        result.success = false;
+        result.error_msg = e.what();
+        return result;
     }
 }
 
-int init_uart(const char* device) {
-    int fd = open(device, O_RDWR | O_NOCTTY | O_NDELAY);
-    if (fd == -1) {
-        perror("Unable to open UART device");
-        return -1;
-    }
-
-    struct termios options;
-    tcgetattr(fd, &options);
-
-    cfsetispeed(&options, B115200);
-    cfsetospeed(&options, B115200);
-
-    options.c_cflag &= ~PARENB;
-    options.c_cflag &= ~CSTOPB;
-    options.c_cflag &= ~CSIZE;
-    options.c_cflag |= CS8;
-
-    options.c_cflag |= (CLOCAL | CREAD);
-
-    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
-    options.c_oflag &= ~OPOST;
-
-    options.c_cc[VMIN] = 0;
-    options.c_cc[VTIME] = 10; 
-
-    tcsetattr(fd, TCSANOW, &options);
-    fcntl(fd, F_SETFL, 0); 
-    return fd;
-}
-
+// ---------------------------------------------------------
+// Main Service Loop
+// ---------------------------------------------------------
 int main() {
-    const char* UART_DEV = "/dev/ttyPS0";
-    const std::string BASE_BIN_DIR = "./compressed_bins";
+    const std::string UART_DEV = "/dev/ttyPS0"; 
+    const std::string BASE_BIN_DIR = "/media/emmc/compressed_data"; 
     
-    int uart_fd = init_uart(UART_DEV);
-    if (uart_fd < 0) {
-        std::cerr << "Failed to initialize UART.\n";
+    OBCInterface obc(UART_DEV);
+    if (!obc.init()) {
+        std::cerr << "CRITICAL: Failed to initialize OBC UART.\n";
         return 1;
     }
 
-    std::cout << "A53 Compression Service Started. Listening on " << UART_DEV << " at 115200 8N1...\n";
-    send_uart_msg(uart_fd, "READY\n");
-
-    char rx_buffer[256];
-    std::string command_buffer = "";
+    obc.send_msg("SYS_READY\r\n");
 
     while (true) {
-        int bytes_read = read(uart_fd, rx_buffer, sizeof(rx_buffer) - 1);
-        if (bytes_read > 0) {
-            rx_buffer[bytes_read] = '\0';
-            command_buffer += rx_buffer;
-
-            size_t pos;
-            // [修正 2] 將 if 改成 while,確保一次 read 的多個指令都能被依序解析
-            while ((pos = command_buffer.find('\n')) != std::string::npos) {
-                std::string cmd_line = command_buffer.substr(0, pos);
-                command_buffer.erase(0, pos + 1);
-
-                if (cmd_line.rfind("CMD:START", 0) == 0) {
-                    send_uart_msg(uart_fd, "ACK:START\n");
-                    
-                    std::istringstream iss(cmd_line);
-                    std::string token, img_path, scp_target;
-                    int show_stats = 0; 
-                    
-                    iss >> token >> img_path >> scp_target;
-                    
-                    if (iss >> show_stats) {}
-
-                    if (img_path.empty() || scp_target.empty()) {
-                        send_uart_msg(uart_fd, "ERROR: INVALID_PARAMETERS\n");
-                        continue;
-                    }
-
-                    std::string final_output_dir;
-                    bool success = process_image(uart_fd, img_path, BASE_BIN_DIR, final_output_dir, show_stats > 0);
-                    
-                    if (success) {
-                        send_uart_msg(uart_fd, "STATUS: TRANSFERRING_SCP\n");
-                        
-                        std::string scp_cmd = "scp -r " + final_output_dir + " " + scp_target;
-                        std::cout << "Executing: " << scp_cmd << "\n";
-                        int scp_result = std::system(scp_cmd.c_str());
-
-                        if (scp_result == 0) {
-                            send_uart_msg(uart_fd, "DONE: SUCCESS\n");
-                        } else {
-                            send_uart_msg(uart_fd, "ERROR: SCP_FAILED\n");
-                        }
-                    } else {
-                        send_uart_msg(uart_fd, "ERROR: COMPRESSION_FAILED\n");
-                    }
-                }
-            }
+        std::string cmd = obc.read_line();
+        if (cmd.empty()) {
+            usleep(50000); 
+            continue;
         }
-        usleep(10000); 
+
+        if (cmd.rfind("CMD_COMPRESS", 0) == 0) {
+            obc.send_msg("ACK_COMPRESS\r\n");
+            
+            std::istringstream iss(cmd);
+            std::string cmd_name, token, img_path, scp_target;            
+            iss >> cmd_name >> token >> img_path >> scp_target;
+
+            if (img_path.empty() || scp_target.empty()) {
+                obc.send_msg("ERR_INVALID_ARGS\r\n");
+                continue;
+            }
+
+            CompressionResult res = process_image(img_path, BASE_BIN_DIR);
+            
+            if (res.success) {
+                std::string scp_cmd = "scp -q -r " + res.output_dir + " " + scp_target;
+                int scp_result = std::system(scp_cmd.c_str());
+
+                if (scp_result == 0) {
+                    std::ostringstream response;
+                    response << "DONE_COMPRESS_AND_TRANSFER " << token << " " << res.output_dir << " " 
+                             << res.total_bytes << " " << res.success_patches << "\r\n";
+                    obc.send_msg(response.str());
+                } else {
+                    obc.send_msg("ERR_SCP_FAILED " + token + "\r\n");
+                }
+            } else {
+                obc.send_msg("ERR_COMPRESSION_FAILED " + token + " " + res.error_msg + "\r\n");
+            }
+        } else if (cmd == "CMD_PING") {
+            obc.send_msg("PONG\r\n");
+        } else if (cmd == "CMD_EXIT") {
+            obc.send_msg("ACK_EXIT_SYSTEM\r\n");
+            break; // 跳出 while 迴圈，執行後面的 close_port() 並結束程式
+        }
     }
 
-    close(uart_fd);
+    obc.close_port();
     return 0;
 }
